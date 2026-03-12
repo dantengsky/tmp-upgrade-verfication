@@ -1,0 +1,209 @@
+name: "Test: Complex Queries"
+database: test_complex
+tests:
+  # Setup data (all written by OLD)
+  - desc: "Create orders table"
+    port: OLD
+    sql: >
+      CREATE TABLE test_complex.orders (
+        id INT, customer_id INT, amount DECIMAL(10,2), status VARCHAR, created_at DATE
+      )
+    expect: ok
+
+  - desc: "Insert orders on OLD"
+    port: OLD
+    sql: >
+      INSERT INTO test_complex.orders VALUES
+        (1,1,100.00,'completed','2024-01-15'),
+        (2,1,200.00,'completed','2024-02-20'),
+        (3,2,150.00,'pending','2024-03-10'),
+        (4,2,300.00,'completed','2024-04-05'),
+        (5,3,50.00,'cancelled','2024-05-01'),
+        (6,3,250.00,'completed','2024-06-15'),
+        (7,1,175.00,'pending','2024-07-20'),
+        (8,4,400.00,'completed','2024-08-01'),
+        (9,4,125.00,'pending','2024-09-10'),
+        (10,2,350.00,'completed','2024-10-15')
+    expect: ok
+
+  - desc: "Create customers table"
+    port: OLD
+    sql: "CREATE TABLE test_complex.customers (id INT, name VARCHAR, tier VARCHAR)"
+    expect: ok
+
+  - desc: "Insert customers on OLD"
+    port: OLD
+    sql: >
+      INSERT INTO test_complex.customers VALUES
+        (1,'Alice','gold'),(2,'Bob','silver'),(3,'Charlie','bronze'),(4,'Diana','gold')
+    expect: ok
+
+  # 1. Subquery
+  - desc: "Subquery on OLD"
+    port: OLD
+    sql: >
+      SELECT count(*) FROM test_complex.orders WHERE customer_id IN (
+        SELECT id FROM test_complex.customers WHERE tier='gold'
+      )
+    expect: eq
+    value: "5"
+
+  - desc: "Subquery on NEW"
+    port: NEW
+    sql: >
+      SELECT count(*) FROM test_complex.orders WHERE customer_id IN (
+        SELECT id FROM test_complex.customers WHERE tier='gold'
+      )
+    expect: eq
+    value: "5"
+
+  - desc: "Scalar subquery on NEW"
+    port: NEW
+    sql: >
+      SELECT count(*) FROM test_complex.orders WHERE amount > (
+        SELECT AVG(amount) FROM test_complex.orders
+      )
+    expect: eq
+    value: "4"
+
+  # 2. CTE
+  - desc: "CTE on OLD"
+    port: OLD
+    sql: |
+      WITH customer_totals AS (
+        SELECT customer_id, SUM(amount) as total FROM test_complex.orders
+        WHERE status='completed' GROUP BY customer_id
+      ) SELECT count(*) FROM customer_totals WHERE total > 200
+    expect: ok
+
+  - desc: "CTE with window function on NEW"
+    port: NEW
+    sql: |
+      WITH ranked AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY amount DESC) as rn
+        FROM test_complex.orders
+      ) SELECT count(*) FROM ranked WHERE rn = 1
+    expect: ok
+
+  # 3. Window functions
+  - desc: "Window function (running total) on OLD"
+    port: OLD
+    sql: >
+      SELECT id, amount,
+        SUM(amount) OVER (PARTITION BY customer_id ORDER BY created_at) as running_total
+        FROM test_complex.orders ORDER BY id LIMIT 3
+    expect: ok
+
+  - desc: "Window function (RANK) on NEW"
+    port: NEW
+    sql: >
+      SELECT id,
+        RANK() OVER (ORDER BY amount DESC) as rnk
+        FROM test_complex.orders LIMIT 5
+    expect: ok
+
+  # 4. UNION
+  - desc: "UNION on OLD"
+    port: OLD
+    sql: >
+      SELECT customer_id FROM test_complex.orders WHERE status='completed'
+        UNION
+        SELECT customer_id FROM test_complex.orders WHERE status='pending'
+    expect: ok
+
+  - desc: "UNION on NEW"
+    port: NEW
+    sql: >
+      SELECT customer_id FROM test_complex.orders WHERE status='completed'
+        UNION
+        SELECT customer_id FROM test_complex.orders WHERE status='pending'
+    expect: ok
+
+  # 5. GROUP BY with HAVING
+  - desc: "GROUP BY HAVING on OLD"
+    port: OLD
+    sql: >
+      SELECT count(*) FROM (
+        SELECT customer_id, count(*) as cnt FROM test_complex.orders
+        GROUP BY customer_id HAVING count(*) >= 3
+      ) t
+    expect: eq
+    value: "2"
+
+  - desc: "GROUP BY HAVING on NEW"
+    port: NEW
+    sql: >
+      SELECT count(*) FROM (
+        SELECT customer_id, count(*) as cnt FROM test_complex.orders
+        GROUP BY customer_id HAVING count(*) >= 3
+      ) t
+    expect: eq
+    value: "2"
+
+  # 6. CASE expression
+  - desc: "CASE expression on OLD"
+    port: OLD
+    sql: >
+      SELECT id,
+        CASE WHEN amount > 200 THEN 'high' WHEN amount > 100 THEN 'mid' ELSE 'low' END as tier
+        FROM test_complex.orders
+    expect: ok
+
+  - desc: "CASE expression on NEW"
+    port: NEW
+    sql: >
+      SELECT id,
+        CASE WHEN amount > 200 THEN 'high' WHEN amount > 100 THEN 'mid' ELSE 'low' END as tier
+        FROM test_complex.orders
+    expect: ok
+
+  # 7. String functions
+  - desc: "String UPPER on OLD"
+    port: OLD
+    sql: "SELECT UPPER(name) FROM test_complex.customers WHERE id=1"
+    expect: eq
+    value: "ALICE"
+
+  - desc: "String UPPER on NEW"
+    port: NEW
+    sql: "SELECT UPPER(name) FROM test_complex.customers WHERE id=1"
+    expect: eq
+    value: "ALICE"
+
+  - desc: "String LENGTH on NEW"
+    port: NEW
+    sql: "SELECT LENGTH(name) FROM test_complex.customers WHERE id=3"
+    expect: eq
+    value: "7"
+
+  # 8. Date functions
+  - desc: "Date functions on OLD"
+    port: OLD
+    sql: >
+      SELECT id, YEAR(created_at), MONTH(created_at)
+        FROM test_complex.orders WHERE YEAR(created_at)=2024 AND MONTH(created_at) >= 6
+    expect: ok
+
+  - desc: "Date functions on NEW"
+    port: NEW
+    sql: >
+      SELECT id, YEAR(created_at), MONTH(created_at)
+        FROM test_complex.orders WHERE YEAR(created_at)=2024 AND MONTH(created_at) >= 6
+    expect: ok
+
+  # 9. EXISTS / NOT EXISTS
+  - desc: "EXISTS on OLD"
+    port: OLD
+    sql: >
+      SELECT count(*) FROM test_complex.customers c
+        WHERE EXISTS (SELECT 1 FROM test_complex.orders o WHERE o.customer_id=c.id AND o.status='pending')
+    expect: eq
+    value: "3"
+
+  - desc: "EXISTS on NEW"
+    port: NEW
+    sql: >
+      SELECT count(*) FROM test_complex.customers c
+        WHERE EXISTS (SELECT 1 FROM test_complex.orders o WHERE o.customer_id=c.id AND o.status='pending')
+    expect: eq
+    value: "3"

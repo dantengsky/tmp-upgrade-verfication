@@ -1,0 +1,192 @@
+name: "Test: Permissions (New Grant Object Types)"
+skip_env: SKIP_DANGEROUS_PERM_TESTS
+database: test_dangerous
+tests:
+  # Setup: baseline user and test database
+  - desc: "Create test table"
+    port: OLD
+    sql: "CREATE TABLE IF NOT EXISTS test_dangerous.t1 (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert baseline data"
+    port: OLD
+    sql: "INSERT INTO test_dangerous.t1 VALUES (1,'baseline')"
+    expect: ok
+
+  - desc: "Create baseline user"
+    port: OLD
+    sql: "CREATE USER dg_baseline IDENTIFIED BY 'Test123!'"
+    expect: ok
+
+  - desc: "Grant standard privilege to baseline"
+    port: OLD
+    sql: "GRANT SELECT ON *.* TO dg_baseline"
+    expect: ok
+
+  - desc: "Baseline user works on OLD"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+    user: dg_baseline
+    password: "Test123!"
+
+  - desc: "Baseline user works on NEW"
+    port: NEW
+    sql: "SELECT 1"
+    expect: ok
+    user: dg_baseline
+    password: "Test123!"
+
+  # Test 1: All 6 types - direct GRANT to user (expect IllegalUser)
+  - desc: "Create dg_direct user on NEW"
+    port: NEW
+    sql: "CREATE USER dg_direct IDENTIFIED BY 'Test123!'"
+    expect: ok
+
+  - desc: "Warehouse direct grant blocked (IllegalUser)"
+    port: NEW
+    sql: "GRANT ALL ON WAREHOUSE default TO dg_direct"
+    expect: fail_contains
+    pattern: "IllegalUser|error"
+
+  - desc: "Connection direct grant blocked (IllegalUser)"
+    port: NEW
+    sql: "GRANT ALL ON CONNECTION default TO dg_direct"
+    expect: fail_contains
+    pattern: "IllegalUser|error"
+
+  - desc: "Sequence direct grant blocked (IllegalUser)"
+    port: NEW
+    sql: "GRANT ALL ON SEQUENCE default TO dg_direct"
+    expect: fail_contains
+    pattern: "IllegalUser|error"
+
+  - desc: "Procedure direct grant blocked (IllegalUser)"
+    port: NEW
+    sql: "GRANT ALL ON PROCEDURE default TO dg_direct"
+    expect: fail_contains
+    pattern: "IllegalUser|error"
+
+  - desc: "MaskingPolicy direct grant blocked (IllegalUser)"
+    port: NEW
+    sql: "GRANT ALL ON MASKINGPOLICY default TO dg_direct"
+    expect: fail_contains
+    pattern: "IllegalUser|error"
+
+  - desc: "RowAccessPolicy direct grant blocked (IllegalUser)"
+    port: NEW
+    sql: "GRANT ALL ON ROWACCESSPOLICY default TO dg_direct"
+    expect: fail_contains
+    pattern: "IllegalUser|error"
+
+  - desc: "Drop dg_direct user"
+    port: NEW
+    sql: "DROP USER IF EXISTS dg_direct"
+    expect: ok
+
+  # Test 2: Role-based grants for each type
+  - desc: "Create dg_role_test role on NEW"
+    port: NEW
+    sql: "CREATE ROLE dg_role_test"
+    expect: ok
+
+  - desc: "Connection grant to role not type-blocked (object not found, expected)"
+    port: NEW
+    sql: "GRANT ALL ON CONNECTION default TO ROLE dg_role_test"
+    expect: fail_contains
+    pattern: "UnknownConnection|does not exist"
+
+  - desc: "Sequence grant to role not type-blocked (object not found, expected)"
+    port: NEW
+    sql: "GRANT ALL ON SEQUENCE default TO ROLE dg_role_test"
+    expect: fail_contains
+    pattern: "UnknownSequence|does not exist"
+
+  - desc: "Warehouse grant to role command accepted (writes to meta, invisible in SHOW GRANTS)"
+    port: NEW
+    sql: "GRANT ALL ON WAREHOUSE default TO ROLE dg_role_test"
+    expect: ok
+
+  - desc: "MaskingPolicy grant to role not supported (syntax error)"
+    port: NEW
+    sql: "GRANT ALL ON MASKINGPOLICY default TO ROLE dg_role_test"
+    expect: fail
+
+  - desc: "RowAccessPolicy grant to role not supported (syntax error)"
+    port: NEW
+    sql: "GRANT ALL ON ROWACCESSPOLICY default TO ROLE dg_role_test"
+    expect: fail
+
+  # Test 3: Assign role with new-type grants to user, verify OLD login
+  - desc: "Create dg_role_user on OLD"
+    port: OLD
+    sql: "CREATE USER dg_role_user IDENTIFIED BY 'Test123!'"
+    expect: ok
+
+  - desc: "Grant standard SELECT to dg_role_user"
+    port: OLD
+    sql: "GRANT SELECT ON *.* TO dg_role_user"
+    expect: ok
+
+  - desc: "dg_role_user login on OLD before role assignment"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+    user: dg_role_user
+    password: "Test123!"
+
+  - desc: "Assign dg_role_test to dg_role_user"
+    port: NEW
+    sql: "GRANT ROLE dg_role_test TO dg_role_user"
+    expect: ok
+
+  - desc: "dg_role_user login on OLD after role with new-type grants (unaffected)"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+    user: dg_role_user
+    password: "Test123!"
+    sleep_before: 1
+
+  - desc: "dg_role_user login on NEW after role assignment"
+    port: NEW
+    sql: "SELECT 1"
+    expect: ok
+    user: dg_role_user
+    password: "Test123!"
+
+  - desc: "OLD SHOW GRANTS FOR ROLE dg_role_test succeeds (may show empty for new types)"
+    port: OLD
+    sql: "SHOW GRANTS FOR ROLE dg_role_test"
+    expect: ok
+
+  # Test 4: Baseline user isolation
+  - desc: "Baseline user still works on OLD (unaffected by new-type grant ops)"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+    user: dg_baseline
+    password: "Test123!"
+
+  - desc: "Baseline user still works on NEW (unaffected by new-type grant ops)"
+    port: NEW
+    sql: "SELECT 1"
+    expect: ok
+    user: dg_baseline
+    password: "Test123!"
+
+  # Cleanup
+  - desc: "Drop dg_baseline"
+    port: NEW
+    sql: "DROP USER IF EXISTS dg_baseline"
+    expect: ok
+
+  - desc: "Drop dg_role_user"
+    port: NEW
+    sql: "DROP USER IF EXISTS dg_role_user"
+    expect: ok
+
+  - desc: "Drop dg_role_test"
+    port: NEW
+    sql: "DROP ROLE IF EXISTS dg_role_test"
+    expect: ok

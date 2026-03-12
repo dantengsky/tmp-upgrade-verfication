@@ -1,0 +1,233 @@
+name: "Test: Cross-Version Read/Write"
+database: test_xver
+tests:
+  # 1. OLD writes, NEW reads
+  - desc: "Create old_to_new table"
+    port: OLD
+    sql: "CREATE TABLE test_xver.old_to_new (id INT, src VARCHAR)"
+    expect: ok
+
+  - desc: "OLD insert #1"
+    port: OLD
+    sql: "INSERT INTO test_xver.old_to_new VALUES (1, 'old')"
+    expect: ok
+
+  - desc: "OLD insert #2"
+    port: OLD
+    sql: "INSERT INTO test_xver.old_to_new VALUES (2, 'old')"
+    expect: ok
+
+  - desc: "OLD insert #3"
+    port: OLD
+    sql: "INSERT INTO test_xver.old_to_new VALUES (3, 'old')"
+    expect: ok
+
+  - desc: "OLD insert #4"
+    port: OLD
+    sql: "INSERT INTO test_xver.old_to_new VALUES (4, 'old')"
+    expect: ok
+
+  - desc: "OLD insert #5"
+    port: OLD
+    sql: "INSERT INTO test_xver.old_to_new VALUES (5, 'old')"
+    expect: ok
+
+  - desc: "NEW reads all OLD inserts"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_xver.old_to_new"
+    expect: eq
+    value: "15"
+
+  # 2. NEW writes, OLD reads
+  - desc: "Create new_to_old table"
+    port: NEW
+    sql: "CREATE TABLE test_xver.new_to_old (id INT, src VARCHAR)"
+    expect: ok
+
+  - desc: "NEW inserts"
+    port: NEW
+    sql: "INSERT INTO test_xver.new_to_old VALUES (1,'new'),(2,'new'),(3,'new')"
+    expect: ok
+
+  - desc: "OLD reads NEW-written data"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_xver.new_to_old"
+    expect: eq
+    value: "6"
+
+  # 3. Mixed writes
+  - desc: "Create mixed table"
+    port: OLD
+    sql: "CREATE TABLE test_xver.mixed (id INT, src VARCHAR)"
+    expect: ok
+
+  - desc: "OLD writes first"
+    port: OLD
+    sql: "INSERT INTO test_xver.mixed VALUES (1,'old'),(2,'old')"
+    expect: ok
+
+  - desc: "NEW appends"
+    port: NEW
+    sql: "INSERT INTO test_xver.mixed VALUES (3,'new'),(4,'new')"
+    expect: ok
+
+  - desc: "NEW reads mixed data"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_xver.mixed"
+    expect: eq
+    value: "10"
+
+  - desc: "OLD reads mixed data"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_xver.mixed"
+    expect: eq
+    value: "10"
+
+  # 4. Large batch cross-version
+  - desc: "Create batch table"
+    port: OLD
+    sql: "CREATE TABLE test_xver.batch (id INT, payload VARCHAR)"
+    expect: ok
+
+  - desc: "OLD batch insert 100 rows"
+    port: OLD
+    sql_generate: "INSERT INTO test_xver.batch VALUES {seq_values(1, 100, \"({i}, 'payload_{i}')\")}"
+    expect: ok
+
+  - desc: "NEW reads OLD batch"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_xver.batch"
+    expect: eq
+    value: "5050"
+
+  - desc: "NEW batch insert 100 rows"
+    port: NEW
+    sql_generate: "INSERT INTO test_xver.batch VALUES {seq_values(101, 200, \"({i}, 'payload_{i}')\")}"
+    expect: ok
+
+  - desc: "OLD reads mixed batch"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_xver.batch"
+    expect: eq
+    value: "20100"
+
+  # 5. COPY INTO: OLD writes to stage, NEW reads from stage
+  - desc: "Create copy source"
+    port: OLD
+    sql: "CREATE TABLE test_xver.copy_src (id INT, name VARCHAR)"
+    expect: ok
+
+  - desc: "Insert copy data"
+    port: OLD
+    sql: "INSERT INTO test_xver.copy_src VALUES (1,'a'),(2,'b'),(3,'c')"
+    expect: ok
+
+  - desc: "Create copy target"
+    port: OLD
+    sql: "CREATE TABLE test_xver.copy_tgt (id INT, name VARCHAR)"
+    expect: ok
+
+  - desc: "Create stage on OLD"
+    port: OLD
+    sql: "CREATE STAGE IF NOT EXISTS test_xver_stg"
+    expect: ok
+
+  - desc: "Copy out to stage on OLD"
+    port: OLD
+    sql: "COPY INTO @test_xver_stg/xver_data FROM test_xver.copy_src FILE_FORMAT=(TYPE=PARQUET)"
+    expect: ok
+
+  - desc: "Copy in from stage on NEW"
+    port: NEW
+    sql: "COPY INTO test_xver.copy_tgt FROM @test_xver_stg/xver_data FILE_FORMAT=(TYPE=PARQUET)"
+    expect: ok
+
+  - desc: "NEW verifies copy"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_xver.copy_tgt"
+    expect: eq
+    value: "6"
+
+  - desc: "OLD verifies copy"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_xver.copy_tgt"
+    expect: eq
+    value: "6"
+
+  # 6. Aggregation on mixed data
+  - desc: "Create agg table"
+    port: OLD
+    sql: "CREATE TABLE test_xver.agg (grp VARCHAR, val INT)"
+    expect: ok
+
+  - desc: "Insert agg OLD"
+    port: OLD
+    sql: "INSERT INTO test_xver.agg VALUES ('a',10),('a',20),('b',30)"
+    expect: ok
+
+  - desc: "Insert agg NEW"
+    port: NEW
+    sql: "INSERT INTO test_xver.agg VALUES ('b',40),('c',50)"
+    expect: ok
+
+  - desc: "OLD SUM on mixed data"
+    port: OLD
+    sql: "SELECT sum(val) FROM test_xver.agg"
+    expect: eq
+    value: "150"
+
+  - desc: "NEW SUM on mixed data"
+    port: NEW
+    sql: "SELECT sum(val) FROM test_xver.agg"
+    expect: eq
+    value: "150"
+
+  - desc: "OLD COUNT DISTINCT"
+    port: OLD
+    sql: "SELECT count(DISTINCT grp) FROM test_xver.agg"
+    expect: eq
+    value: "3"
+
+  # 7. JOIN across tables written by different versions
+  - desc: "Create left table"
+    port: OLD
+    sql: "CREATE TABLE test_xver.left_t (id INT, name VARCHAR)"
+    expect: ok
+
+  - desc: "Create right table"
+    port: NEW
+    sql: "CREATE TABLE test_xver.right_t (id INT, score INT)"
+    expect: ok
+
+  - desc: "Insert left on OLD"
+    port: OLD
+    sql: "INSERT INTO test_xver.left_t VALUES (1,'alice'),(2,'bob'),(3,'charlie')"
+    expect: ok
+
+  - desc: "Insert right on NEW"
+    port: NEW
+    sql: "INSERT INTO test_xver.right_t VALUES (1,90),(2,85),(4,70)"
+    expect: ok
+
+  - desc: "OLD INNER JOIN (left=OLD, right=NEW)"
+    port: OLD
+    sql: "SELECT sum(l.id) FROM test_xver.left_t l INNER JOIN test_xver.right_t r ON l.id=r.id"
+    expect: eq
+    value: "3"
+
+  - desc: "NEW INNER JOIN (left=OLD, right=NEW)"
+    port: NEW
+    sql: "SELECT sum(l.id) FROM test_xver.left_t l INNER JOIN test_xver.right_t r ON l.id=r.id"
+    expect: eq
+    value: "3"
+
+  - desc: "OLD LEFT JOIN"
+    port: OLD
+    sql: "SELECT sum(l.id) FROM test_xver.left_t l LEFT JOIN test_xver.right_t r ON l.id=r.id"
+    expect: eq
+    value: "6"
+
+  - desc: "Drop stage"
+    port: OLD
+    sql: "DROP STAGE IF EXISTS test_xver_stg"
+    expect: ok

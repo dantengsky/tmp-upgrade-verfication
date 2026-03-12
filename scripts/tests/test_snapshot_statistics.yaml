@@ -1,0 +1,141 @@
+name: "Test: TableSnapshotStatistics v3/v4 Compatibility"
+database: test_stats
+cleanup_port: NEW
+tests:
+  # 1. Verify enable_table_snapshot_stats defaults to 0 on NEW
+  - desc: "enable_table_snapshot_stats defaults to 0 on NEW"
+    port: NEW
+    sql: "SELECT value FROM system.settings WHERE name='enable_table_snapshot_stats'"
+    expect: eq
+    value: "0"
+
+  # 2. ANALYZE TABLE with default setting (stats disabled)
+  #
+  # Even with enable_table_snapshot_stats=0, NEW's ANALYZE writes/references a
+  # _v4.mpk snapshot stats file. OLD's ANALYZE cannot read this file format
+  # (StorageNotFound 404). However, OLD's SELECT is unaffected.
+  - desc: "Create table for safe ANALYZE"
+    port: OLD
+    sql: "CREATE TABLE test_stats.safe_analyze (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert data for safe ANALYZE"
+    port: OLD
+    sql: "INSERT INTO test_stats.safe_analyze VALUES (1,'a'),(2,'b'),(3,'c')"
+    expect: ok
+
+  - desc: "NEW ANALYZE TABLE with default setting"
+    port: NEW
+    sql: "ANALYZE TABLE test_stats.safe_analyze"
+    expect: ok
+
+  - desc: "OLD SELECT unaffected after NEW ANALYZE (default setting)"
+    port: OLD
+    sql: "SELECT count(*) FROM test_stats.safe_analyze"
+    expect: eq
+    value: "3"
+
+  - desc: "OLD ANALYZE fails after NEW ANALYZE (v4 snapshot stats file incompatible)"
+    port: OLD
+    sql: "ANALYZE TABLE test_stats.safe_analyze"
+    expect: fail
+
+  # 2b. NEW INSERT only (no ANALYZE) — does v879 snapshot reference _v4.mpk?
+  #
+  # If v879's any write (not just ANALYZE) sets table_statistics_location in the
+  # snapshot pointing to _v4.mpk, then OLD ANALYZE should also fail here.
+  - desc: "Create table for INSERT-only test"
+    port: OLD
+    sql: "CREATE TABLE test_stats.insert_only (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "OLD inserts baseline data"
+    port: OLD
+    sql: "INSERT INTO test_stats.insert_only VALUES (1,'a'),(2,'b')"
+    expect: ok
+
+  - desc: "OLD ANALYZE works before NEW touches table"
+    port: OLD
+    sql: "ANALYZE TABLE test_stats.insert_only"
+    expect: ok
+
+  - desc: "NEW INSERT only (no ANALYZE)"
+    port: NEW
+    sql: "INSERT INTO test_stats.insert_only VALUES (3,'c')"
+    expect: ok
+
+  - desc: "OLD SELECT unaffected after NEW INSERT"
+    port: OLD
+    sql: "SELECT count(*) FROM test_stats.insert_only"
+    expect: eq
+    value: "3"
+
+  - desc: "OLD ANALYZE after NEW INSERT (tests if INSERT alone triggers _v4.mpk ref)"
+    port: OLD
+    sql: "ANALYZE TABLE test_stats.insert_only"
+    expect: fail
+
+  # 3. ANALYZE TABLE with enable_table_snapshot_stats=1 on NEW
+  - desc: "Create table for dangerous ANALYZE"
+    port: NEW
+    sql: "CREATE TABLE test_stats.dangerous_analyze (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert data for dangerous ANALYZE"
+    port: NEW
+    sql: "INSERT INTO test_stats.dangerous_analyze VALUES (1,'x'),(2,'y')"
+    expect: ok
+
+  - desc: "OLD reads table before dangerous ANALYZE"
+    port: OLD
+    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    expect: eq
+    value: "2"
+
+  - desc: "NEW ANALYZE TABLE with enable_table_snapshot_stats=1 (writes v4 stats)"
+    port: NEW
+    sql: "SET enable_table_snapshot_stats=1; ANALYZE TABLE test_stats.dangerous_analyze"
+    expect: ok
+
+  - desc: "OLD SELECT fails after NEW writes v4 stats (statistics deserialization incompatible)"
+    port: OLD
+    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    expect: fail
+
+  - desc: "NEW reads table with v4 stats normally"
+    port: NEW
+    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    expect: eq
+    value: "2"
+
+  - desc: "NEW inserts after v4 stats written"
+    port: NEW
+    sql: "INSERT INTO test_stats.dangerous_analyze VALUES (3,'z')"
+    expect: ok
+
+  - desc: "OLD SELECT still fails after subsequent DML (stats location propagates)"
+    port: OLD
+    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    expect: fail
+
+  # 4. Verify NEW can read v3 stats written by OLD (backward compat)
+  - desc: "Create table for OLD stats"
+    port: OLD
+    sql: "CREATE TABLE test_stats.old_stats (id INT, name VARCHAR)"
+    expect: ok
+
+  - desc: "Insert data for OLD stats"
+    port: OLD
+    sql: "INSERT INTO test_stats.old_stats VALUES (1,'alice'),(2,'bob')"
+    expect: ok
+
+  - desc: "OLD ANALYZE TABLE (writes v3 stats)"
+    port: OLD
+    sql: "ANALYZE TABLE test_stats.old_stats"
+    expect: ok
+
+  - desc: "NEW reads table with v3 stats (backward compatible)"
+    port: NEW
+    sql: "SELECT count(*) FROM test_stats.old_stats"
+    expect: eq
+    value: "2"

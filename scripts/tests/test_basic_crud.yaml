@@ -1,0 +1,180 @@
+name: "Test: Basic CRUD"
+database: test_crud
+tests:
+  - desc: "NEW can connect"
+    port: NEW
+    sql: "SELECT 1"
+    expect: ok
+
+  # 1. Write on OLD, read on NEW
+  - desc: "Create table on OLD"
+    port: OLD
+    sql: "CREATE TABLE test_crud.t_old_write (id INT, name VARCHAR, val DOUBLE, ts TIMESTAMP)"
+    expect: ok
+
+  - desc: "Insert rows on OLD"
+    port: OLD
+    sql: "INSERT INTO test_crud.t_old_write VALUES (1,'alice',3.14,'2024-01-01 00:00:00'),(2,'bob',2.72,'2024-06-15 12:30:00')"
+    expect: ok
+
+  - desc: "NEW reads OLD-written count"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_crud.t_old_write"
+    expect: eq
+    value: "3"
+
+  - desc: "NEW reads OLD-written row"
+    port: NEW
+    sql: "SELECT name FROM test_crud.t_old_write WHERE id=1"
+    expect: eq
+    value: "alice"
+
+  # 2. Write on NEW, read on OLD
+  - desc: "Create table on NEW"
+    port: NEW
+    sql: "CREATE TABLE test_crud.t_new_write (id INT, name VARCHAR)"
+    expect: ok
+
+  - desc: "Insert rows on NEW"
+    port: NEW
+    sql: "INSERT INTO test_crud.t_new_write VALUES (1,'charlie'),(2,'diana')"
+    expect: ok
+
+  - desc: "NEW reads own data"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_crud.t_new_write"
+    expect: eq
+    value: "3"
+
+  - desc: "OLD reads NEW-written data"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_crud.t_new_write"
+    expect: eq
+    value: "3"
+
+  - desc: "OLD reads NEW-written row"
+    port: OLD
+    sql: "SELECT name FROM test_crud.t_new_write WHERE id=1"
+    expect: eq
+    value: "charlie"
+
+  # 3. UPDATE cross-version
+  - desc: "NEW updates OLD-written table"
+    port: NEW
+    sql: "UPDATE test_crud.t_old_write SET val=9.99 WHERE id=1"
+    expect: ok
+
+  - desc: "NEW reads own update"
+    port: NEW
+    sql: "SELECT val FROM test_crud.t_old_write WHERE id=1"
+    expect: eq
+    value: "9.99"
+
+  - desc: "OLD reads after NEW update"
+    port: OLD
+    sql: "SELECT val FROM test_crud.t_old_write WHERE id=1"
+    expect: eq
+    value: "9.99"
+
+  # 4. DELETE cross-version
+  - desc: "OLD deletes from NEW-written table"
+    port: OLD
+    sql: "DELETE FROM test_crud.t_new_write WHERE id=2"
+    expect: ok
+
+  - desc: "NEW verifies OLD delete"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_crud.t_new_write"
+    expect: eq
+    value: "1"
+
+  - desc: "OLD verifies own delete"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_crud.t_new_write"
+    expect: eq
+    value: "1"
+
+  # 5. MERGE INTO from NEW
+  - desc: "Create merge source"
+    port: OLD
+    sql: "CREATE TABLE test_crud.src (id INT, name VARCHAR)"
+    expect: ok
+
+  - desc: "Create merge target"
+    port: OLD
+    sql: "CREATE TABLE test_crud.tgt (id INT, name VARCHAR)"
+    expect: ok
+
+  - desc: "Insert source"
+    port: OLD
+    sql: "INSERT INTO test_crud.src VALUES (1,'new_a'),(2,'new_b'),(4,'new_d')"
+    expect: ok
+
+  - desc: "Insert target"
+    port: OLD
+    sql: "INSERT INTO test_crud.tgt VALUES (1,'old_a'),(3,'old_c')"
+    expect: ok
+
+  - desc: "MERGE INTO from NEW"
+    port: NEW
+    sql: >
+      MERGE INTO test_crud.tgt USING test_crud.src ON tgt.id = src.id
+      WHEN MATCHED THEN UPDATE SET tgt.name = src.name
+      WHEN NOT MATCHED THEN INSERT (id, name) VALUES (src.id, src.name)
+    expect: ok
+
+  - desc: "NEW verifies merge count"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_crud.tgt"
+    expect: eq
+    value: "10"
+
+  - desc: "OLD verifies merge count"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_crud.tgt"
+    expect: eq
+    value: "10"
+
+  - desc: "OLD verifies merge update"
+    port: OLD
+    sql: "SELECT name FROM test_crud.tgt WHERE id=1"
+    expect: eq
+    value: "new_a"
+
+  # 6. Interleaved writes
+  - desc: "Create interleave table"
+    port: OLD
+    sql: "CREATE TABLE test_crud.interleave (id INT, src VARCHAR)"
+    expect: ok
+
+  - desc: "OLD insert 1"
+    port: OLD
+    sql: "INSERT INTO test_crud.interleave VALUES (1,'old')"
+    expect: ok
+
+  - desc: "NEW insert 2"
+    port: NEW
+    sql: "INSERT INTO test_crud.interleave VALUES (2,'new')"
+    expect: ok
+
+  - desc: "OLD insert 3"
+    port: OLD
+    sql: "INSERT INTO test_crud.interleave VALUES (3,'old')"
+    expect: ok
+
+  - desc: "NEW insert 4"
+    port: NEW
+    sql: "INSERT INTO test_crud.interleave VALUES (4,'new')"
+    expect: ok
+
+  - desc: "OLD reads interleaved"
+    port: OLD
+    sql: "SELECT sum(id) FROM test_crud.interleave"
+    expect: eq
+    value: "10"
+
+  - desc: "NEW reads interleaved"
+    port: NEW
+    sql: "SELECT sum(id) FROM test_crud.interleave"
+    expect: eq
+    value: "10"

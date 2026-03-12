@@ -1,0 +1,171 @@
+name: "Test: Data Types Compatibility"
+database: test_types
+tests:
+  # Standard types: write on OLD, read on NEW
+  - desc: "Create table with standard types on OLD"
+    port: OLD
+    sql: >
+      CREATE TABLE test_types.standard (
+        c_bool BOOLEAN,
+        c_int8 TINYINT, c_int16 SMALLINT, c_int32 INT, c_int64 BIGINT,
+        c_uint8 TINYINT UNSIGNED, c_uint16 SMALLINT UNSIGNED, c_uint32 INT UNSIGNED, c_uint64 BIGINT UNSIGNED,
+        c_float32 FLOAT, c_float64 DOUBLE,
+        c_decimal DECIMAL(18,6),
+        c_string VARCHAR, c_date DATE, c_timestamp TIMESTAMP,
+        c_variant VARIANT,
+        c_array ARRAY(INT),
+        c_tuple TUPLE(a INT, b VARCHAR)
+      )
+    expect: ok
+
+  - desc: "Insert standard types on OLD"
+    port: OLD
+    sql: >
+      INSERT INTO test_types.standard VALUES (
+        true, -1, -2, -3, -4, 1, 2, 3, 4,
+        1.5, 2.5, 123.456789,
+        'hello', '2024-06-15', '2024-06-15 12:30:00',
+        '{"key":"value"}',
+        [1,2,3], (42,'test')
+      )
+    expect: ok
+
+  - desc: "NEW reads string"
+    port: NEW
+    sql: "SELECT c_string FROM test_types.standard"
+    expect: eq
+    value: "hello"
+
+  - desc: "NEW reads decimal"
+    port: NEW
+    sql: "SELECT c_decimal FROM test_types.standard"
+    expect: eq
+    value: "123.456789"
+
+  - desc: "NEW reads bool"
+    port: NEW
+    sql: "SELECT c_bool FROM test_types.standard"
+    expect: eq
+    value: "1"
+
+  - desc: "NEW reads int64"
+    port: NEW
+    sql: "SELECT c_int64 FROM test_types.standard"
+    expect: eq
+    value: "-4"
+
+  - desc: "NEW reads date"
+    port: NEW
+    sql: "SELECT c_date FROM test_types.standard"
+    expect: eq
+    value: "2024-06-15"
+
+  # Variant/JSON: write on OLD, query on NEW
+  - desc: "Create JSON table"
+    port: OLD
+    sql: "CREATE TABLE test_types.json_test (id INT, data VARIANT)"
+    expect: ok
+
+  - desc: "Insert JSON on OLD"
+    port: OLD
+    sql: >
+      INSERT INTO test_types.json_test VALUES
+        (1, '{"name":"alice","age":30,"tags":["a","b"]}'),
+        (2, '{"name":"bob","nested":{"x":1}}')
+    expect: ok
+
+  - desc: "NEW JSON path query"
+    port: NEW
+    sql: "SELECT data:name FROM test_types.json_test WHERE id=1"
+    expect: eq
+    value: '"alice"'
+
+  # Nullable types
+  - desc: "Create nullable table"
+    port: OLD
+    sql: "CREATE TABLE test_types.nullable_test (id INT, val INT NULL, name VARCHAR NULL)"
+    expect: ok
+
+  - desc: "Insert nulls on OLD"
+    port: OLD
+    sql: "INSERT INTO test_types.nullable_test VALUES (1, NULL, 'a'), (2, 42, NULL)"
+    expect: ok
+
+  - desc: "NEW reads NULL"
+    port: NEW
+    sql: "SELECT val FROM test_types.nullable_test WHERE id=1"
+    expect: eq
+    value: "NULL"
+
+  - desc: "NEW counts NULLs"
+    port: NEW
+    sql: "SELECT count(*) FROM test_types.nullable_test WHERE val IS NULL"
+    expect: eq
+    value: "1"
+
+  # Map type
+  - desc: "Create MAP table on OLD"
+    port: OLD
+    sql: "CREATE TABLE test_types.map_test (id INT, m MAP(VARCHAR, VARCHAR))"
+    expect: ok
+
+  - desc: "Insert MAP on OLD"
+    port: OLD
+    sql: "INSERT INTO test_types.map_test VALUES (1, {'k1':'v1','k2':'v2'})"
+    expect: ok
+
+  - desc: "NEW reads MAP"
+    port: NEW
+    sql: "SELECT m['k1'] FROM test_types.map_test WHERE id=1"
+    expect: eq
+    value: "v1"
+
+  # NEW writes, OLD reads (works with S3 storage)
+  - desc: "Create table on NEW"
+    port: NEW
+    sql: "CREATE TABLE test_types.new_write (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert on NEW"
+    port: NEW
+    sql: "INSERT INTO test_types.new_write VALUES (1,'from_new')"
+    expect: ok
+
+  - desc: "OLD reads NEW-written data"
+    port: OLD
+    sql: "SELECT val FROM test_types.new_write WHERE id=1"
+    expect: eq
+    value: "from_new"
+
+  # Decimal256 (precision > 38): cross-version block prefix compatibility
+  - desc: "Create Decimal256 table on OLD"
+    port: OLD
+    sql: "CREATE TABLE test_types.decimal256_old (id INT, val DECIMAL(39,6))"
+    expect: ok
+
+  - desc: "Insert Decimal256 on OLD (g-prefix block)"
+    port: OLD
+    sql: "INSERT INTO test_types.decimal256_old VALUES (1, 123456789012345678901234567890123.456789)"
+    expect: ok
+
+  - desc: "NEW reads OLD-written Decimal256 (g-prefix)"
+    port: NEW
+    sql: "SELECT val FROM test_types.decimal256_old WHERE id=1"
+    expect: eq
+    value: "123456789012345678901234567890123.456789"
+
+  - desc: "Create Decimal256 table on NEW"
+    port: NEW
+    sql: "CREATE TABLE test_types.decimal256_new (id INT, val DECIMAL(39,6))"
+    expect: ok
+
+  - desc: "Insert Decimal256 on NEW (h-prefix block)"
+    port: NEW
+    sql: "INSERT INTO test_types.decimal256_new VALUES (1, 987654321098765432109876543210987.654321)"
+    expect: ok
+
+  - desc: "OLD reads NEW-written Decimal256 (h-prefix)"
+    port: OLD
+    sql: "SELECT val FROM test_types.decimal256_new WHERE id=1"
+    expect: eq
+    value: "987654321098765432109876543210987.654321"

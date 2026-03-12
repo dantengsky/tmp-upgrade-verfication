@@ -1,0 +1,249 @@
+name: "Test: Permissions (Safe - Standard Grant Objects)"
+database: test_perm
+tests:
+  # Setup
+  - desc: "Create test table"
+    port: OLD
+    sql: "CREATE TABLE test_perm.data (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert test data"
+    port: OLD
+    sql: "INSERT INTO test_perm.data VALUES (1,'secret'),(2,'public')"
+    expect: ok
+
+  # 1. CREATE USER on OLD, verify login on both
+  - desc: "Create user on OLD"
+    port: OLD
+    sql: "CREATE USER user_old IDENTIFIED BY 'Pass123!'"
+    expect: ok
+
+  - desc: "OLD root still works after create user"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+
+  - desc: "user_old can connect to OLD"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+    user: user_old
+    password: "Pass123!"
+
+  - desc: "user_old can connect to NEW"
+    port: NEW
+    sql: "SELECT 1"
+    expect: ok
+    user: user_old
+    password: "Pass123!"
+
+  # 2. CREATE USER on NEW, verify login on both
+  - desc: "Create user on NEW"
+    port: NEW
+    sql: "CREATE USER user_new IDENTIFIED BY 'Pass456!'"
+    expect: ok
+
+  - desc: "user_new can connect to OLD"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+    user: user_new
+    password: "Pass456!"
+
+  - desc: "user_new can connect to NEW"
+    port: NEW
+    sql: "SELECT 1"
+    expect: ok
+    user: user_new
+    password: "Pass456!"
+
+  # 3. GRANT SELECT on table (OLD), verify on both
+  - desc: "Grant SELECT on OLD"
+    port: OLD
+    sql: "GRANT SELECT ON test_perm.data TO user_old"
+    expect: ok
+
+  - desc: "user_old query on OLD"
+    port: OLD
+    sql: "SELECT val FROM test_perm.data WHERE id=1"
+    expect: eq
+    value: "secret"
+    user: user_old
+    password: "Pass123!"
+
+  - desc: "user_old query on NEW"
+    port: NEW
+    sql: "SELECT val FROM test_perm.data WHERE id=1"
+    expect: eq
+    value: "secret"
+    user: user_old
+    password: "Pass123!"
+
+  # 4. GRANT SELECT on table (NEW), verify on both
+  - desc: "Grant SELECT on NEW"
+    port: NEW
+    sql: "GRANT SELECT ON test_perm.data TO user_new"
+    expect: ok
+
+  - desc: "user_new query on OLD"
+    port: OLD
+    sql: "SELECT val FROM test_perm.data WHERE id=2"
+    expect: eq
+    value: "public"
+    user: user_new
+    password: "Pass456!"
+
+  - desc: "user_new query on NEW"
+    port: NEW
+    sql: "SELECT val FROM test_perm.data WHERE id=2"
+    expect: eq
+    value: "public"
+    user: user_new
+    password: "Pass456!"
+
+  # 5. ROLE management cross-version
+  - desc: "Create role on OLD"
+    port: OLD
+    sql: "CREATE ROLE role_reader"
+    expect: ok
+
+  - desc: "Grant to role on OLD"
+    port: OLD
+    sql: "GRANT SELECT ON test_perm.* TO ROLE role_reader"
+    expect: ok
+
+  - desc: "Assign role on NEW"
+    port: NEW
+    sql: "GRANT ROLE role_reader TO user_old"
+    expect: ok
+
+  - desc: "user_old with role on OLD"
+    port: OLD
+    sql: "SELECT * FROM test_perm.data LIMIT 1"
+    expect: ok
+    user: user_old
+    password: "Pass123!"
+
+  - desc: "Create role on NEW"
+    port: NEW
+    sql: "CREATE ROLE role_writer"
+    expect: ok
+
+  - desc: "Grant to role on NEW"
+    port: NEW
+    sql: "GRANT INSERT, UPDATE, DELETE ON test_perm.* TO ROLE role_writer"
+    expect: ok
+
+  - desc: "Assign role on OLD"
+    port: OLD
+    sql: "GRANT ROLE role_writer TO user_new"
+    expect: ok
+
+  # 6. ALTER USER password on NEW, verify login on OLD
+  - desc: "Change password on NEW"
+    port: NEW
+    sql: "ALTER USER user_old IDENTIFIED BY 'NewPass789!'"
+    expect: ok
+
+  - desc: "user_old new password works on OLD"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+    user: user_old
+    password: "NewPass789!"
+    sleep_before: 1
+
+  - desc: "user_old old password rejected on OLD"
+    port: OLD
+    sql: "SELECT 1"
+    expect: fail
+    user: user_old
+    password: "Pass123!"
+
+  # 7. REVOKE on NEW, verify on OLD
+  - desc: "Grant INSERT to user_new"
+    port: NEW
+    sql: "GRANT INSERT ON test_perm.data TO user_new"
+    expect: ok
+
+  - desc: "Revoke INSERT on NEW"
+    port: NEW
+    sql: "REVOKE INSERT ON test_perm.data FROM user_new"
+    expect: ok
+
+  # 8. GRANT via role (v1.2.887 requires CREATE-like privs go through roles)
+  - desc: "Create role_creator on NEW"
+    port: NEW
+    sql: "CREATE ROLE role_creator"
+    expect: ok
+
+  - desc: "Grant CREATE to role on NEW"
+    port: NEW
+    sql: "GRANT CREATE ON test_perm.* TO ROLE role_creator"
+    expect: ok
+
+  - desc: "Assign creator role on NEW"
+    port: NEW
+    sql: "GRANT ROLE role_creator TO user_new"
+    expect: ok
+
+  - desc: "Set default role on NEW"
+    port: NEW
+    sql: "ALTER USER user_new WITH DEFAULT_ROLE = 'role_creator'"
+    expect: ok
+
+  - desc: "user_new create table on OLD via NEW-granted role (privilege format incompatible)"
+    port: OLD
+    sql: "CREATE TABLE test_perm.user_new_tbl (x INT)"
+    expect: known_fail
+    user: user_new
+    password: "Pass456!"
+
+  - desc: "user_new create table on NEW via role"
+    port: NEW
+    sql: "CREATE TABLE test_perm.user_new_tbl (x INT)"
+    expect: ok
+    user: user_new
+    password: "Pass456!"
+
+  # 9. Verify root still works on both after all operations
+  - desc: "Root still works on OLD after all perm ops"
+    port: OLD
+    sql: "SELECT 1"
+    expect: ok
+
+  - desc: "Root still works on NEW after all perm ops"
+    port: NEW
+    sql: "SELECT 1"
+    expect: ok
+
+  # Cleanup
+  - desc: "Drop user_old"
+    port: OLD
+    sql: "DROP USER IF EXISTS user_old"
+    expect: ok
+
+  - desc: "Drop user_new"
+    port: OLD
+    sql: "DROP USER IF EXISTS user_new"
+    expect: ok
+
+  - desc: "Drop role_reader"
+    port: OLD
+    sql: "DROP ROLE IF EXISTS role_reader"
+    expect: ok
+
+  - desc: "Drop role_writer"
+    port: OLD
+    sql: "DROP ROLE IF EXISTS role_writer"
+    expect: ok
+
+  - desc: "Drop role_creator"
+    port: OLD
+    sql: "DROP ROLE IF EXISTS role_creator"
+    expect: ok
+
+  - desc: "Drop user_new_tbl"
+    port: OLD
+    sql: "DROP TABLE IF EXISTS test_perm.user_new_tbl"
+    expect: ok
