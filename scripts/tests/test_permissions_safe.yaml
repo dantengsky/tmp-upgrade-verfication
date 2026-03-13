@@ -192,6 +192,14 @@ tests:
     sql: "ALTER USER user_new WITH DEFAULT_ROLE = 'role_creator'"
     expect: ok
 
+  - desc: "user_new SHOW ROLES on OLD (verify role_creator visible)"
+    port: OLD
+    sql: "SELECT name FROM system.roles WHERE name = 'role_creator'"
+    expect: eq
+    value: "role_creator"
+    user: user_new
+    password: "Pass456!"
+
   - desc: "user_new create table on OLD via NEW-granted role (privilege format incompatible)"
     port: OLD
     sql: "CREATE TABLE test_perm.user_new_tbl (x INT)"
