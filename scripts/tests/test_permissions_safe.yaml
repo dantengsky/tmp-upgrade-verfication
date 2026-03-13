@@ -101,6 +101,31 @@ tests:
     user: user_new
     password: "Pass456!"
 
+  # 4.1 REVOKE SELECT on NEW, verify on both (clean slate before role tests)
+  - desc: "Revoke SELECT from user_old on NEW"
+    port: NEW
+    sql: "REVOKE SELECT ON test_perm.data FROM user_old"
+    expect: ok
+
+  - desc: "Revoke SELECT from user_new on NEW"
+    port: NEW
+    sql: "REVOKE SELECT ON test_perm.data FROM user_new"
+    expect: ok
+
+  - desc: "user_old SELECT rejected on OLD after revoke"
+    port: OLD
+    sql: "SELECT val FROM test_perm.data WHERE id=1"
+    expect: fail
+    user: user_old
+    password: "Pass123!"
+
+  - desc: "user_new SELECT rejected on NEW after revoke"
+    port: NEW
+    sql: "SELECT val FROM test_perm.data WHERE id=2"
+    expect: fail
+    user: user_new
+    password: "Pass456!"
+
   # 5. ROLE management cross-version
   - desc: "Create role on OLD"
     port: OLD
