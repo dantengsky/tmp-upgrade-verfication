@@ -1,0 +1,103 @@
+# Local Docker environment to simulate distributed mode.
+# 7 containers: 1 ctl + 3 meta + 3 query, all on a shared network.
+# ctl has SSH access to all other containers via key-based auth.
+#
+# Usage:
+#   docker compose up -d
+#   docker compose exec ctl bash
+#   # inside ctl:
+#   export $(grep -v '^#' /workspace/.env | xargs)
+#   python3 /workspace/scripts/run.py --mode distributed \
+#     --meta-hosts meta1,meta2,meta3 \
+#     --query-hosts query1,query2,query3
+
+x-node: &node-base
+  image: ubuntu:22.04
+  init: true
+  volumes:
+    - shared-bin:/shared-bin
+  networks:
+    - upgrade-net
+  entrypoint: ["/bin/bash", "-c"]
+  command:
+    - |
+      apt-get update -qq && apt-get install -y -qq openssh-server curl rsync >/dev/null 2>&1
+      mkdir -p /run/sshd /root/.ssh
+      # Accept the shared public key
+      if [ -f /shared-bin/.ssh/id_ed25519.pub ]; then
+        cat /shared-bin/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
+        chmod 600 /root/.ssh/authorized_keys
+      fi
+      # Wait for key to appear (ctl generates it)
+      for i in $(seq 1 30); do
+        [ -f /shared-bin/.ssh/id_ed25519.pub ] && break
+        sleep 1
+      done
+      cat /shared-bin/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys 2>/dev/null
+      chmod 600 /root/.ssh/authorized_keys
+      exec /usr/sbin/sshd -D -e
+
+services:
+  ctl:
+    image: ubuntu:22.04
+    init: true
+    hostname: ctl
+    volumes:
+      - .:/workspace
+      - shared-bin:/shared-bin
+    networks:
+      - upgrade-net
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        apt-get update -qq && apt-get install -y -qq openssh-client mysql-client python3 python3-pip curl rsync >/dev/null 2>&1
+        pip3 install -q pyyaml
+        # Generate SSH key pair and share via volume
+        mkdir -p /shared-bin/.ssh /root/.ssh
+        if [ ! -f /shared-bin/.ssh/id_ed25519 ]; then
+          ssh-keygen -t ed25519 -f /shared-bin/.ssh/id_ed25519 -N "" -q
+        fi
+        cp /shared-bin/.ssh/id_ed25519 /root/.ssh/id_ed25519
+        cp /shared-bin/.ssh/id_ed25519.pub /root/.ssh/id_ed25519.pub
+        chmod 600 /root/.ssh/id_ed25519
+        # Keep container alive
+        echo "CTL ready. Use 'docker compose exec ctl bash' to enter."
+        tail -f /dev/null
+    depends_on:
+      - meta1
+      - meta2
+      - meta3
+      - query1
+      - query2
+      - query3
+
+  meta1:
+    <<: *node-base
+    hostname: meta1
+
+  meta2:
+    <<: *node-base
+    hostname: meta2
+
+  meta3:
+    <<: *node-base
+    hostname: meta3
+
+  query1:
+    <<: *node-base
+    hostname: query1
+
+  query2:
+    <<: *node-base
+    hostname: query2
+
+  query3:
+    <<: *node-base
+    hostname: query3
+
+volumes:
+  shared-bin:
+
+networks:
+  upgrade-net:
+    driver: bridge
