@@ -799,6 +799,7 @@ def phase_compat_test():
         "test_permissions_safe",
         "test_permissions_new_grant_objects",
         "test_snapshot_statistics",
+        "test_replace_travel_flashback",
     ]:
         run_yaml_test(os.path.join(tests_dir, f"{name}.yaml"))
 

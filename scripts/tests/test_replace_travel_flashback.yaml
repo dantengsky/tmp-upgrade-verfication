@@ -1,0 +1,260 @@
+name: "Test: Replace Into, Time Travel, Flashback"
+database: test_advanced
+tests:
+  # ============================================================
+  # REPLACE INTO 跨版本兼容
+  # ============================================================
+  - desc: "Create table for REPLACE INTO"
+    port: OLD
+    sql: "CREATE TABLE test_advanced.t_replace (id INT, val VARCHAR) ENGINE=FUSE"
+    expect: ok
+
+  - desc: "Insert initial rows on OLD"
+    port: OLD
+    sql: "INSERT INTO test_advanced.t_replace VALUES (1,'a'),(2,'b'),(3,'c')"
+    expect: ok
+
+  - desc: "REPLACE INTO on OLD (update id=1, insert id=4)"
+    port: OLD
+    sql: "REPLACE INTO test_advanced.t_replace ON (id) VALUES (1,'a_old'),(4,'d_old')"
+    expect: ok
+
+  - desc: "OLD verifies own REPLACE"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_replace WHERE id=1"
+    expect: eq
+    value: "a_old"
+
+  - desc: "NEW reads OLD REPLACE result"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_replace WHERE id=1"
+    expect: eq
+    value: "a_old"
+
+  - desc: "NEW reads OLD REPLACE inserted row"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_replace WHERE id=4"
+    expect: eq
+    value: "d_old"
+
+  - desc: "REPLACE INTO on NEW (update id=2, insert id=5)"
+    port: NEW
+    sql: "REPLACE INTO test_advanced.t_replace ON (id) VALUES (2,'b_new'),(5,'e_new')"
+    expect: ok
+
+  - desc: "NEW verifies own REPLACE"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_replace WHERE id=2"
+    expect: eq
+    value: "b_new"
+
+  - desc: "OLD reads NEW REPLACE result"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_replace WHERE id=2"
+    expect: eq
+    value: "b_new"
+
+  - desc: "OLD reads NEW REPLACE inserted row"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_replace WHERE id=5"
+    expect: eq
+    value: "e_new"
+
+  - desc: "OLD REPLACE overwrites NEW-written row"
+    port: OLD
+    sql: "REPLACE INTO test_advanced.t_replace ON (id) VALUES (5,'e_old_overwrite')"
+    expect: ok
+
+  - desc: "NEW reads OLD overwrite"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_replace WHERE id=5"
+    expect: eq
+    value: "e_old_overwrite"
+
+  - desc: "Final row count"
+    port: NEW
+    sql: "SELECT count(*) FROM test_advanced.t_replace"
+    expect: eq
+    value: "5"
+
+  # ============================================================
+  # Time Travel 跨版本兼容
+  # sleep_before 放在 mutation 步骤上，确保 INSERT 和 UPDATE 之间有时间间隔
+  # date_sub(second, 2, now()) 指向 mutation 之前的状态
+  # ============================================================
+
+  # --- 对照组：单版本 time travel（OLD only）---
+  - desc: "Create table for OLD-only time travel"
+    port: OLD
+    sql: "CREATE TABLE test_advanced.t_travel_old (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert v1 on OLD"
+    port: OLD
+    sql: "INSERT INTO test_advanced.t_travel_old VALUES (1,'v1')"
+    expect: ok
+
+  - desc: "Update to v2 on OLD (sleep 5s before to create time gap)"
+    port: OLD
+    sql: "UPDATE test_advanced.t_travel_old SET val='v2' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD time travel reads own v1"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_travel_old AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: eq
+    value: "v1"
+
+  # --- 跨版本：1 次 NEW 写入后 OLD time travel ---
+  - desc: "Create table for cross-version time travel"
+    port: OLD
+    sql: "CREATE TABLE test_advanced.t_travel_cross (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert v1 on OLD"
+    port: OLD
+    sql: "INSERT INTO test_advanced.t_travel_cross VALUES (1,'v1')"
+    expect: ok
+
+  - desc: "Update to v2 on NEW (1st NEW write, sleep 5s before)"
+    port: NEW
+    sql: "UPDATE test_advanced.t_travel_cross SET val='v2' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD time travel after 1 NEW write"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_travel_cross AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: eq
+    value: "v1"
+
+  - desc: "NEW reads current"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_travel_cross WHERE id=1"
+    expect: eq
+    value: "v2"
+
+  # --- 跨版本：2 次 NEW 写入后 OLD time travel（已知不兼容）---
+  - desc: "2nd NEW write (sleep 5s before)"
+    port: NEW
+    sql: "INSERT INTO test_advanced.t_travel_cross VALUES (2,'v3')"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD time travel after 2 NEW writes (snapshot chain broken)"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_travel_cross AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: known_fail
+
+  - desc: "NEW time travel after 2 NEW writes (control group)"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_travel_cross AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: eq
+    value: "v2"
+
+  # ============================================================
+  # ALTER TABLE FLASHBACK 跨版本兼容
+  # ============================================================
+
+  # --- 对照组：单版本 flashback（OLD only）---
+  - desc: "Create table for OLD-only flashback"
+    port: OLD
+    sql: "CREATE TABLE test_advanced.t_flash_old (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert initial data on OLD"
+    port: OLD
+    sql: "INSERT INTO test_advanced.t_flash_old VALUES (1,'original'),(2,'original')"
+    expect: ok
+
+  - desc: "OLD mutates own data (sleep 5s before)"
+    port: OLD
+    sql: "UPDATE test_advanced.t_flash_old SET val='mutated' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD flashback own table"
+    port: OLD
+    sql: "ALTER TABLE test_advanced.t_flash_old FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: ok
+
+  - desc: "OLD verifies own flashback"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_flash_old WHERE id=1"
+    expect: eq
+    value: "original"
+
+  # --- 跨版本：1 次 NEW 写入后 OLD flashback ---
+  - desc: "Create table for cross-version flashback"
+    port: OLD
+    sql: "CREATE TABLE test_advanced.t_flash_cross (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert initial data on OLD"
+    port: OLD
+    sql: "INSERT INTO test_advanced.t_flash_cross VALUES (1,'original'),(2,'original')"
+    expect: ok
+
+  - desc: "NEW mutates data (1st NEW write, sleep 5s before)"
+    port: NEW
+    sql: "UPDATE test_advanced.t_flash_cross SET val='mutated' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD flashback after 1 NEW write"
+    port: OLD
+    sql: "ALTER TABLE test_advanced.t_flash_cross FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: ok
+
+  - desc: "OLD verifies flashback after 1 NEW write"
+    port: OLD
+    sql: "SELECT val FROM test_advanced.t_flash_cross WHERE id=1"
+    expect: eq
+    value: "original"
+
+  - desc: "NEW also sees flashback result"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_flash_cross WHERE id=1"
+    expect: eq
+    value: "original"
+
+  # --- 跨版本：2 次 NEW 写入后 OLD flashback（已知不兼容）---
+  - desc: "Create table for 2-write flashback"
+    port: OLD
+    sql: "CREATE TABLE test_advanced.t_flash_cross2 (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert initial data on OLD"
+    port: OLD
+    sql: "INSERT INTO test_advanced.t_flash_cross2 VALUES (1,'original')"
+    expect: ok
+
+  - desc: "NEW 1st write (sleep 5s before)"
+    port: NEW
+    sql: "UPDATE test_advanced.t_flash_cross2 SET val='new1' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "NEW 2nd write (sleep 5s before)"
+    port: NEW
+    sql: "INSERT INTO test_advanced.t_flash_cross2 VALUES (2,'new2')"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD flashback after 2 NEW writes (snapshot chain broken)"
+    port: OLD
+    sql: "ALTER TABLE test_advanced.t_flash_cross2 FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: known_fail
+
+  - desc: "NEW flashback after own 2 writes (control group, sleep 5s before)"
+    port: NEW
+    sql: "ALTER TABLE test_advanced.t_flash_cross2 FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "NEW verifies own flashback"
+    port: NEW
+    sql: "SELECT val FROM test_advanced.t_flash_cross2 WHERE id=1"
+    expect: eq
+    value: "new1"
