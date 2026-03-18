@@ -215,8 +215,9 @@ BOLD = "\033[1m"
 NC = "\033[0m"
 
 _pass = _fail = _known = _skip = 0
-_results = []       # [{status, desc, detail, suite}]
+_results = []       # [{status, desc, detail, suite, yaml_file}]
 _current_suite = ""
+_current_yaml_file = ""
 _start_time = None
 
 
@@ -236,7 +237,7 @@ def log_pass(msg):
     global _pass
     print(f"{GREEN}[PASS]{NC} {msg}", flush=True)
     _pass += 1
-    _results.append({"status": "PASS", "desc": msg, "detail": "", "suite": _current_suite})
+    _results.append({"status": "PASS", "desc": msg, "detail": "", "suite": _current_suite, "yaml_file": _current_yaml_file})
 
 
 def log_fail(msg):
@@ -247,21 +248,21 @@ def log_fail(msg):
     m = re.search(r"\((.+)\)\s*$", msg)
     if m:
         detail = m.group(1)
-    _results.append({"status": "FAIL", "desc": msg, "detail": detail, "suite": _current_suite})
+    _results.append({"status": "FAIL", "desc": msg, "detail": detail, "suite": _current_suite, "yaml_file": _current_yaml_file})
 
 
 def log_known(msg):
     global _known
     print(f"{YELLOW}[KNOWN]{NC} {msg}", flush=True)
     _known += 1
-    _results.append({"status": "KNOWN", "desc": msg, "detail": "", "suite": _current_suite})
+    _results.append({"status": "KNOWN", "desc": msg, "detail": "", "suite": _current_suite, "yaml_file": _current_yaml_file})
 
 
 def log_skip(msg):
     global _skip
     print(f"{YELLOW}[SKIP]{NC} {msg}", flush=True)
     _skip += 1
-    _results.append({"status": "SKIP", "desc": msg, "detail": "", "suite": _current_suite})
+    _results.append({"status": "SKIP", "desc": msg, "detail": "", "suite": _current_suite, "yaml_file": _current_yaml_file})
 
 
 def log_section(msg):
@@ -421,18 +422,33 @@ def generate_report():
     lines.append(f"## Detailed Results")
     lines.append(f"")
 
-    # Group by suite preserving order
+    # Group by suite preserving order, track yaml file per suite
     suites = []
+    suite_yaml = {}
     seen = set()
     for r in _results:
         s = r["suite"] or "(ungrouped)"
         if s not in seen:
             suites.append(s)
             seen.add(s)
+            yf = r.get("yaml_file", "")
+            if yf:
+                rel = os.path.relpath(yf, repo_root)
+                suite_yaml[s] = rel
+
+    # Build blob base URL for linking to yaml files
+    blob_base = ""
+    if commit_hash and commit_url:
+        # commit_url is .../commit/<hash>, change to .../blob/<hash>
+        blob_base = commit_url.replace("/commit/", "/blob/")
 
     idx = 0
     for suite in suites:
-        lines.append(f"### {suite}")
+        yaml_link = ""
+        if blob_base and suite in suite_yaml:
+            yaml_url = f"{blob_base}/{suite_yaml[suite]}"
+            yaml_link = f" ([source]({yaml_url}))"
+        lines.append(f"### {suite}{yaml_link}")
         lines.append(f"")
         lines.append(f"| # | Status | Description | Detail |")
         lines.append(f"|---|--------|-------------|--------|")
@@ -1107,12 +1123,13 @@ EXPECT_DISPATCH = {
 }
 
 def run_yaml_test(yaml_file):
-    global _current_suite
+    global _current_suite, _current_yaml_file
     with open(yaml_file) as f:
         doc = yaml.safe_load(f)
 
     name = doc.get("name", "")
     _current_suite = name or os.path.basename(yaml_file)
+    _current_yaml_file = yaml_file
     db = doc.get("database", "")
     cleanup_port = doc.get("cleanup_port", "OLD")
     skip_env = doc.get("skip_env", "")
