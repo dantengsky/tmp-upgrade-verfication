@@ -73,7 +73,7 @@ python3 scripts/run.py --skip-download
 python3 scripts/run.py --cleanup --skip-download
 
 # 跳过新 GrantObject 类型权限测试
-python3 scripts/run.py --skip-dangerous
+python3 scripts/run.py --skip-experimental-grants
 
 # 指定初始 meta 版本
 python3 scripts/run.py --initial-meta 1.2.292
@@ -114,7 +114,7 @@ python3 scripts/run.py --mode distributed \
 | `NEW_QUERY_VERSION` | `1.2.887` | 新 Query 版本 |
 | `DOWNLOAD_BASE_URL` | `https://repo.databend.com/databend/yf` | 二进制下载地址 |
 | `WORK_DIR` | `./work` | 工作目录 |
-| `SKIP_DANGEROUS_PERM_TESTS` | `0` | 设为 `1` 跳过新 GrantObject 权限测试 |
+| `SKIP_EXPERIMENTAL_GRANT_TESTS` | `0` | 设为 `1` 跳过新 GrantObject 权限测试 |
 
 分布式模式专用：
 

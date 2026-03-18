@@ -76,46 +76,46 @@ tests:
     expect: fail
 
   # 3. ANALYZE TABLE with enable_table_snapshot_stats=1 on NEW
-  - desc: "Create table for dangerous ANALYZE"
+  - desc: "Create table for v4 stats ANALYZE"
     port: NEW
-    sql: "CREATE TABLE test_stats.dangerous_analyze (id INT, val VARCHAR)"
+    sql: "CREATE TABLE test_stats.v4_stats_analyze (id INT, val VARCHAR)"
     expect: ok
 
-  - desc: "Insert data for dangerous ANALYZE"
+  - desc: "Insert data for v4 stats ANALYZE"
     port: NEW
-    sql: "INSERT INTO test_stats.dangerous_analyze VALUES (1,'x'),(2,'y')"
+    sql: "INSERT INTO test_stats.v4_stats_analyze VALUES (1,'x'),(2,'y')"
     expect: ok
 
-  - desc: "OLD reads table before dangerous ANALYZE"
+  - desc: "OLD reads table before v4 stats ANALYZE"
     port: OLD
-    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    sql: "SELECT count(*) FROM test_stats.v4_stats_analyze"
     expect: eq
     value: "2"
 
   - desc: "NEW ANALYZE TABLE with enable_table_snapshot_stats=1 (writes v4 stats)"
     port: NEW
-    sql: "SET enable_table_snapshot_stats=1; ANALYZE TABLE test_stats.dangerous_analyze"
+    sql: "SET enable_table_snapshot_stats=1; ANALYZE TABLE test_stats.v4_stats_analyze"
     expect: ok
 
   - desc: "OLD SELECT fails after NEW writes v4 stats (statistics deserialization incompatible)"
     port: OLD
-    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    sql: "SELECT count(*) FROM test_stats.v4_stats_analyze"
     expect: fail
 
   - desc: "NEW reads table with v4 stats normally"
     port: NEW
-    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    sql: "SELECT count(*) FROM test_stats.v4_stats_analyze"
     expect: eq
     value: "2"
 
   - desc: "NEW inserts after v4 stats written"
     port: NEW
-    sql: "INSERT INTO test_stats.dangerous_analyze VALUES (3,'z')"
+    sql: "INSERT INTO test_stats.v4_stats_analyze VALUES (3,'z')"
     expect: ok
 
   - desc: "OLD SELECT still fails after subsequent DML (stats location propagates)"
     port: OLD
-    sql: "SELECT count(*) FROM test_stats.dangerous_analyze"
+    sql: "SELECT count(*) FROM test_stats.v4_stats_analyze"
     expect: fail
 
   # 4. Verify NEW can read v3 stats written by OLD (backward compat)

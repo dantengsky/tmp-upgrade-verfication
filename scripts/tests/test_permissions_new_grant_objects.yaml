@@ -1,16 +1,16 @@
 name: "Test: Permissions (New Grant Object Types)"
-skip_env: SKIP_DANGEROUS_PERM_TESTS
-database: test_dangerous
+skip_env: SKIP_EXPERIMENTAL_GRANT_TESTS
+database: test_new_grants
 tests:
   # Setup: baseline user and test database
   - desc: "Create test table"
     port: OLD
-    sql: "CREATE TABLE IF NOT EXISTS test_dangerous.t1 (id INT, val VARCHAR)"
+    sql: "CREATE TABLE IF NOT EXISTS test_new_grants.t1 (id INT, val VARCHAR)"
     expect: ok
 
   - desc: "Insert baseline data"
     port: OLD
-    sql: "INSERT INTO test_dangerous.t1 VALUES (1,'baseline')"
+    sql: "INSERT INTO test_new_grants.t1 VALUES (1,'baseline')"
     expect: ok
 
   - desc: "Create baseline user"

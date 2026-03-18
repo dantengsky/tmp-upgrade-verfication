@@ -9,7 +9,7 @@ Options:
   --work-dir DIR        Working directory (default: ./work)
   --cleanup             Remove work dir before start
   --skip-download       Skip download phase
-  --skip-dangerous      Skip new grant object type permission tests
+  --skip-experimental-grants  Skip new grant object type permission tests
   --mode MODE           Deploy mode: local (default) or distributed
   --meta-hosts IPs      Comma-separated meta host IPs (distributed mode)
   --query-hosts IPs     Comma-separated query host IPs (distributed mode)
@@ -127,7 +127,7 @@ class Config:
         self.meta_start_timeout = int(_env("META_START_TIMEOUT", "30"))
         self.query_start_timeout = int(_env("QUERY_START_TIMEOUT", "30"))
         self.mysql_cmd = _env("MYSQL_CMD", "mysql")
-        self.skip_dangerous = _env("SKIP_DANGEROUS_PERM_TESTS", "0") == "1"
+        self.skip_experimental_grants = _env("SKIP_EXPERIMENTAL_GRANT_TESTS", "0") == "1"
 
         # Distributed mode settings
         self.deploy_mode = _env("DEPLOY_MODE", "local")
@@ -318,6 +318,57 @@ def generate_report():
 
     verdict = "PASS" if _fail == 0 else "FAIL"
 
+    # Git commit info — try git command first, fall back to reading .git/ files
+    commit_hash = ""
+    commit_url = ""
+    repo_root = os.path.dirname(SCRIPT_DIR)
+    try:
+        r = subprocess.run(["git", "-C", repo_root, "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            commit_hash = r.stdout.strip()
+        r2 = subprocess.run(["git", "-C", repo_root, "remote", "get-url", "origin"],
+                            capture_output=True, text=True, timeout=5)
+        if r2.returncode == 0:
+            remote = r2.stdout.strip()
+    except Exception:
+        # git not installed — read .git files directly
+        remote = ""
+        try:
+            head_file = os.path.join(repo_root, ".git", "HEAD")
+            with open(head_file) as f:
+                head = f.read().strip()
+            if head.startswith("ref: "):
+                ref_path = os.path.join(repo_root, ".git", head[5:])
+                with open(ref_path) as f:
+                    commit_hash = f.read().strip()
+            else:
+                commit_hash = head
+        except Exception:
+            pass
+        try:
+            config_file = os.path.join(repo_root, ".git", "config")
+            with open(config_file) as f:
+                in_origin = False
+                for line in f:
+                    line = line.strip()
+                    if line == '[remote "origin"]':
+                        in_origin = True
+                    elif line.startswith("["):
+                        in_origin = False
+                    elif in_origin and line.startswith("url = "):
+                        remote = line[6:].strip()
+                        break
+        except Exception:
+            pass
+    if remote:
+        if remote.startswith("git@github.com:"):
+            remote = "https://github.com/" + remote[len("git@github.com:"):].removesuffix(".git")
+        elif remote.endswith(".git"):
+            remote = remote.removesuffix(".git")
+        if commit_hash:
+            commit_url = f"{remote}/commit/{commit_hash}"
+
     lines = []
     lines.append(f"# Databend Upgrade Compatibility Test Report")
     lines.append(f"")
@@ -346,6 +397,11 @@ def generate_report():
     if cfg.deploy_mode == "distributed":
         lines.append(f"| Meta Hosts | {', '.join(h.ip for h in meta_host_objs)} |")
         lines.append(f"| Query Hosts | {', '.join(h.ip for h in query_host_objs)} |")
+    if commit_hash:
+        if commit_url:
+            lines.append(f"| Test Script | [{commit_hash[:8]}]({commit_url}) |")
+        else:
+            lines.append(f"| Test Script | {commit_hash[:8]} |")
     lines.append(f"")
     lines.append(f"## Execution Summary")
     lines.append(f"")
@@ -1064,8 +1120,8 @@ def run_yaml_test(yaml_file):
     if skip_env and os.environ.get(skip_env, "0") == "1":
         log_skip(f"{name} skipped ({skip_env}=1)")
         return
-    if cfg.skip_dangerous and skip_env == "SKIP_DANGEROUS_PERM_TESTS":
-        log_skip(f"{name} skipped (--skip-dangerous)")
+    if cfg.skip_experimental_grants and skip_env == "SKIP_EXPERIMENTAL_GRANT_TESTS":
+        log_skip(f"{name} skipped (--skip-experimental-grants)")
         return
 
     old_host, old_port = cfg.query_old_endpoint
@@ -1269,7 +1325,7 @@ def main():
     parser.add_argument("--work-dir", dest="work_dir")
     parser.add_argument("--cleanup", action="store_true")
     parser.add_argument("--skip-download", action="store_true")
-    parser.add_argument("--skip-dangerous", action="store_true")
+    parser.add_argument("--skip-experimental-grants", dest="skip_experimental_grants", action="store_true")
     parser.add_argument("--mode", choices=["local", "distributed"],
                         help="Deploy mode: local (default) or distributed")
     parser.add_argument("--meta-hosts", dest="meta_hosts",
@@ -1284,8 +1340,8 @@ def main():
         cfg.initial_meta = args.initial_meta
     if args.work_dir:
         cfg.work_dir = args.work_dir
-    if args.skip_dangerous:
-        cfg.skip_dangerous = True
+    if args.skip_experimental_grants:
+        cfg.skip_experimental_grants = True
     if args.mode:
         cfg.deploy_mode = args.mode
     if args.meta_hosts:
