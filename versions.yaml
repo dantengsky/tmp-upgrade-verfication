@@ -1,0 +1,14 @@
+# Databend binary download URLs
+# run.py loads this file to determine which tarballs to download.
+
+download_base_url: "https://repo.databend.com/databend/yf"
+
+meta:
+  "1.2.292": "meta-srv-v1.2.292.tar.gz"
+  "1.2.307": "meta-srv-v1.2.307.tar.gz"
+  "1.2.768": "meta-srv-v1.2.768.tar.gz"
+  "1.2.879": "meta-srv-v1.2.879.tar.gz"
+
+query:
+  "1.2.636": "databend-query-v1.2.636-rc8.6-93d82fc91f.tar.gz"
+  "1.2.887": "databend-query-v1.2.887-nightly-107e2a1327.tar.gz"

@@ -52,19 +52,25 @@ if os.path.isfile(_env_file):
 # ============================================================================
 
 DOWNLOAD_BASE_URL = os.environ.get(
-    "DOWNLOAD_BASE_URL", "https://repo.databend.com/databend/yf"
+    "DOWNLOAD_BASE_URL", ""
 )
 
+# Load version URLs from versions.yaml
+_versions_file = os.path.join(os.path.dirname(SCRIPT_DIR), "versions.yaml")
+with open(_versions_file) as _f:
+    _versions = yaml.safe_load(_f)
+
+if not DOWNLOAD_BASE_URL:
+    DOWNLOAD_BASE_URL = _versions.get("download_base_url", "")
+
 META_URLS = {
-    "1.2.292": f"{DOWNLOAD_BASE_URL}/meta-srv-v1.2.292.tar.gz",
-    "1.2.307": f"{DOWNLOAD_BASE_URL}/meta-srv-v1.2.307.tar.gz",
-    "1.2.768": f"{DOWNLOAD_BASE_URL}/meta-srv-v1.2.768.tar.gz",
-    "1.2.879": f"{DOWNLOAD_BASE_URL}/meta-srv-v1.2.879.tar.gz",
+    ver: f"{DOWNLOAD_BASE_URL}/{filename}"
+    for ver, filename in _versions.get("meta", {}).items()
 }
 
 QUERY_URLS = {
-    "1.2.636": f"{DOWNLOAD_BASE_URL}/databend-query-v1.2.636-rc8.6-93d82fc91f.tar.gz",
-    "1.2.887": f"{DOWNLOAD_BASE_URL}/databend-query-v1.2.887-nightly-107e2a1327.tar.gz",
+    ver: f"{DOWNLOAD_BASE_URL}/{filename}"
+    for ver, filename in _versions.get("query", {}).items()
 }
 
 
