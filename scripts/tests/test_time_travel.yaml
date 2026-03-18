@@ -1,0 +1,72 @@
+name: "Test: Time Travel"
+database: test_time_travel
+tests:
+  # --- 对照组：单版本 time travel（OLD only）---
+  - desc: "Create table for OLD-only time travel"
+    port: OLD
+    sql: "CREATE TABLE test_time_travel.t_travel_old (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert v1 on OLD"
+    port: OLD
+    sql: "INSERT INTO test_time_travel.t_travel_old VALUES (1,'v1')"
+    expect: ok
+
+  - desc: "Update to v2 on OLD (sleep 5s before to create time gap)"
+    port: OLD
+    sql: "UPDATE test_time_travel.t_travel_old SET val='v2' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD time travel reads own v1"
+    port: OLD
+    sql: "SELECT val FROM test_time_travel.t_travel_old AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: eq
+    value: "v1"
+
+  # --- 跨版本：1 次 NEW 写入后 OLD time travel ---
+  - desc: "Create table for cross-version time travel"
+    port: OLD
+    sql: "CREATE TABLE test_time_travel.t_travel_cross (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert v1 on OLD"
+    port: OLD
+    sql: "INSERT INTO test_time_travel.t_travel_cross VALUES (1,'v1')"
+    expect: ok
+
+  - desc: "Update to v2 on NEW (1st NEW write, sleep 5s before)"
+    port: NEW
+    sql: "UPDATE test_time_travel.t_travel_cross SET val='v2' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD time travel after 1 NEW write"
+    port: OLD
+    sql: "SELECT val FROM test_time_travel.t_travel_cross AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: eq
+    value: "v1"
+
+  - desc: "NEW reads current"
+    port: NEW
+    sql: "SELECT val FROM test_time_travel.t_travel_cross WHERE id=1"
+    expect: eq
+    value: "v2"
+
+  # --- 跨版本：2 次 NEW 写入后 OLD time travel（已知不兼容）---
+  - desc: "2nd NEW write (sleep 5s before)"
+    port: NEW
+    sql: "INSERT INTO test_time_travel.t_travel_cross VALUES (2,'v3')"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD time travel after 2 NEW writes (snapshot chain broken)"
+    port: OLD
+    sql: "SELECT val FROM test_time_travel.t_travel_cross AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: known_fail
+
+  - desc: "NEW time travel after 2 NEW writes (control group)"
+    port: NEW
+    sql: "SELECT val FROM test_time_travel.t_travel_cross AT (TIMESTAMP => date_sub(second, 3, now())) WHERE id=1"
+    expect: eq
+    value: "v2"

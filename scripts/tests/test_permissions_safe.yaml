@@ -225,17 +225,19 @@ tests:
     user: user_new
     password: "Pass456!"
 
-  - desc: "user_new create table on OLD via NEW-granted role (privilege format incompatible)"
+  - desc: "user_new create table on OLD via NEW-granted role (wait 16s for role cache refresh)"
     port: OLD
     sql: "CREATE TABLE test_perm.user_new_tbl (x INT)"
-    expect: known_fail
+    expect: ok
     user: user_new
     password: "Pass456!"
+    sleep_before: 16
 
-  - desc: "user_new create table on NEW via role"
+  - desc: "user_new reads OLD-created table on NEW via role"
     port: NEW
-    sql: "CREATE TABLE test_perm.user_new_tbl (x INT)"
-    expect: ok
+    sql: "SELECT count(*) FROM test_perm.user_new_tbl"
+    expect: eq
+    value: "0"
     user: user_new
     password: "Pass456!"
 

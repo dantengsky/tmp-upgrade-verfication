@@ -1,0 +1,75 @@
+name: "Test: Replace Into"
+database: test_replace
+tests:
+  - desc: "Create table for REPLACE INTO"
+    port: OLD
+    sql: "CREATE TABLE test_replace.t_replace (id INT, val VARCHAR) ENGINE=FUSE"
+    expect: ok
+
+  - desc: "Insert initial rows on OLD"
+    port: OLD
+    sql: "INSERT INTO test_replace.t_replace VALUES (1,'a'),(2,'b'),(3,'c')"
+    expect: ok
+
+  - desc: "REPLACE INTO on OLD (update id=1, insert id=4)"
+    port: OLD
+    sql: "REPLACE INTO test_replace.t_replace ON (id) VALUES (1,'a_old'),(4,'d_old')"
+    expect: ok
+
+  - desc: "OLD verifies own REPLACE"
+    port: OLD
+    sql: "SELECT val FROM test_replace.t_replace WHERE id=1"
+    expect: eq
+    value: "a_old"
+
+  - desc: "NEW reads OLD REPLACE result"
+    port: NEW
+    sql: "SELECT val FROM test_replace.t_replace WHERE id=1"
+    expect: eq
+    value: "a_old"
+
+  - desc: "NEW reads OLD REPLACE inserted row"
+    port: NEW
+    sql: "SELECT val FROM test_replace.t_replace WHERE id=4"
+    expect: eq
+    value: "d_old"
+
+  - desc: "REPLACE INTO on NEW (update id=2, insert id=5)"
+    port: NEW
+    sql: "REPLACE INTO test_replace.t_replace ON (id) VALUES (2,'b_new'),(5,'e_new')"
+    expect: ok
+
+  - desc: "NEW verifies own REPLACE"
+    port: NEW
+    sql: "SELECT val FROM test_replace.t_replace WHERE id=2"
+    expect: eq
+    value: "b_new"
+
+  - desc: "OLD reads NEW REPLACE result"
+    port: OLD
+    sql: "SELECT val FROM test_replace.t_replace WHERE id=2"
+    expect: eq
+    value: "b_new"
+
+  - desc: "OLD reads NEW REPLACE inserted row"
+    port: OLD
+    sql: "SELECT val FROM test_replace.t_replace WHERE id=5"
+    expect: eq
+    value: "e_new"
+
+  - desc: "OLD REPLACE overwrites NEW-written row"
+    port: OLD
+    sql: "REPLACE INTO test_replace.t_replace ON (id) VALUES (5,'e_old_overwrite')"
+    expect: ok
+
+  - desc: "NEW reads OLD overwrite"
+    port: NEW
+    sql: "SELECT val FROM test_replace.t_replace WHERE id=5"
+    expect: eq
+    value: "e_old_overwrite"
+
+  - desc: "Final row count"
+    port: NEW
+    sql: "SELECT count(*) FROM test_replace.t_replace"
+    expect: eq
+    value: "5"

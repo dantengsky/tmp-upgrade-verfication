@@ -1,0 +1,104 @@
+name: "Test: Flashback"
+database: test_flashback
+tests:
+  # --- 对照组：单版本 flashback（OLD only）---
+  - desc: "Create table for OLD-only flashback"
+    port: OLD
+    sql: "CREATE TABLE test_flashback.t_flash_old (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert initial data on OLD"
+    port: OLD
+    sql: "INSERT INTO test_flashback.t_flash_old VALUES (1,'original'),(2,'original')"
+    expect: ok
+
+  - desc: "OLD mutates own data (sleep 5s before)"
+    port: OLD
+    sql: "UPDATE test_flashback.t_flash_old SET val='mutated' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD flashback own table"
+    port: OLD
+    sql: "ALTER TABLE test_flashback.t_flash_old FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: ok
+
+  - desc: "OLD verifies own flashback"
+    port: OLD
+    sql: "SELECT val FROM test_flashback.t_flash_old WHERE id=1"
+    expect: eq
+    value: "original"
+
+  # --- 跨版本：1 次 NEW 写入后 OLD flashback ---
+  - desc: "Create table for cross-version flashback"
+    port: OLD
+    sql: "CREATE TABLE test_flashback.t_flash_cross (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert initial data on OLD"
+    port: OLD
+    sql: "INSERT INTO test_flashback.t_flash_cross VALUES (1,'original'),(2,'original')"
+    expect: ok
+
+  - desc: "NEW mutates data (1st NEW write, sleep 5s before)"
+    port: NEW
+    sql: "UPDATE test_flashback.t_flash_cross SET val='mutated' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD flashback after 1 NEW write"
+    port: OLD
+    sql: "ALTER TABLE test_flashback.t_flash_cross FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: ok
+
+  - desc: "OLD verifies flashback after 1 NEW write"
+    port: OLD
+    sql: "SELECT val FROM test_flashback.t_flash_cross WHERE id=1"
+    expect: eq
+    value: "original"
+
+  - desc: "NEW also sees flashback result"
+    port: NEW
+    sql: "SELECT val FROM test_flashback.t_flash_cross WHERE id=1"
+    expect: eq
+    value: "original"
+
+  # --- 跨版本：2 次 NEW 写入后 OLD flashback（已知不兼容）---
+  - desc: "Create table for 2-write flashback"
+    port: OLD
+    sql: "CREATE TABLE test_flashback.t_flash_cross2 (id INT, val VARCHAR)"
+    expect: ok
+
+  - desc: "Insert initial data on OLD"
+    port: OLD
+    sql: "INSERT INTO test_flashback.t_flash_cross2 VALUES (1,'original')"
+    expect: ok
+
+  - desc: "NEW 1st write (sleep 5s before)"
+    port: NEW
+    sql: "UPDATE test_flashback.t_flash_cross2 SET val='new1' WHERE id=1"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "NEW 2nd write (sleep 5s before)"
+    port: NEW
+    sql: "INSERT INTO test_flashback.t_flash_cross2 VALUES (2,'new2')"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "OLD flashback after 2 NEW writes (snapshot chain broken)"
+    port: OLD
+    sql: "ALTER TABLE test_flashback.t_flash_cross2 FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: known_fail
+
+  - desc: "NEW flashback after own 2 writes (control group, sleep 5s before)"
+    port: NEW
+    sql: "ALTER TABLE test_flashback.t_flash_cross2 FLASHBACK TO (TIMESTAMP => date_sub(second, 3, now()))"
+    expect: ok
+    sleep_before: 5
+
+  - desc: "NEW verifies own flashback"
+    port: NEW
+    sql: "SELECT val FROM test_flashback.t_flash_cross2 WHERE id=1"
+    expect: eq
+    value: "new1"
