@@ -1412,6 +1412,12 @@ def main():
         for d in [cfg.data_dir, cfg.log_dir, cfg.conf_dir]:
             if os.path.isdir(d):
                 shutil.rmtree(d)
+        if cfg.deploy_mode == "distributed":
+            rwd = _remote_work_dir()
+            for host_obj in meta_host_objs + query_host_objs:
+                for sub in ["data", "logs", "conf"]:
+                    host_obj.run_cmd(f"rm -rf {os.path.join(rwd, sub)}", timeout=10)
+                log_info(f"Cleaned remote work dir on {host_obj.ip}")
 
     for d in [cfg.work_dir, cfg.bin_dir, cfg.data_dir, cfg.log_dir, cfg.conf_dir]:
         os.makedirs(d, exist_ok=True)
