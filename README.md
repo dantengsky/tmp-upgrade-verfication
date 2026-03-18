@@ -138,7 +138,7 @@ python3 scripts/run.py --mode distributed \
                    每次升级一个节点，升级后验证 query 仍可正常服务
 4. Query Setup  → 启动 NEW query，与已在线的 OLD 共存
                    验证双方连接正常，双方均可读取升级前数据
-5. Compat Test  → 依次执行 9 个测试套件
+5. Compat Test  → 依次执行 11 个测试套件
 6. Cleanup      → 停止所有进程
 ```
 
@@ -184,7 +184,14 @@ docker compose up -d
 # 运行测试（需先配置 .env 中的 S3 凭证）
 docker compose exec ctl bash -c 'export $(grep -v "^#" /workspace/.env | xargs) && python3 /workspace/scripts/run.py --mode distributed --meta-hosts meta1,meta2,meta3 --query-hosts query1,query2,query3 --skip-download'
 
-# 清理
+# 重跑前清理远程节点数据（Docker 模式下需手动清理）
+docker compose exec ctl bash -c '
+  for h in meta1 meta2 meta3 query1 query2 query3; do
+    ssh -o StrictHostKeyChecking=no $h "pkill -9 databend 2>/dev/null; rm -rf /tmp/databend-upgrade-test/work/{data,logs,conf}"
+  done
+'
+
+# 销毁容器
 docker compose down
 ```
 
@@ -200,6 +207,8 @@ docker compose down
 | Permissions Safe | `test_permissions_safe.yaml` | CREATE USER、GRANT、ROLE、ALTER USER、REVOKE 跨版本 |
 | Permissions New Objects | `test_permissions_new_grant_objects.yaml` | 6 种新 GrantObject 类型兼容性 |
 | Snapshot Statistics | `test_snapshot_statistics.yaml` | TableSnapshotStatistics v3/v4 跨版本兼容性 |
-| Replace/Travel/Flashback | `test_replace_travel_flashback.yaml` | REPLACE INTO、Time Travel、Flashback 跨版本兼容性 |
+| Replace Into | `test_replace_into.yaml` | REPLACE INTO 跨版本兼容性 |
+| Time Travel | `test_time_travel.yaml` | Time Travel（AT TIMESTAMP）跨版本兼容性 |
+| Flashback | `test_flashback.yaml` | ALTER TABLE FLASHBACK 跨版本兼容性 |
 
 测试用例采用 YAML 声明式定义，支持的断言类型：`ok`、`eq`、`fail`、`known_fail`、`contains`、`fail_contains`。
